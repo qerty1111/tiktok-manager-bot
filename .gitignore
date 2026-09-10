@@ -1,0 +1,47 @@
+# Environment variables & secrets
+.env
+.env.local
+
+# Database & runtime data
+data/
+*.db
+*.sqlite
+*.sqlite3
+media/
+cookies_*.json
+
+# Python virtual environment & cache
+venv/
+.venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Temporary screenshots, media & dumps
+*.png
+*.jpg
+*.jpeg
+*.mp4
+*.webp
+*.html
+*.txt
+!requirements.txt
+*.log
+
+# Scratch and one-off debug scripts
+check_*.py
+test_*.py
+scratch_*.py
+inspect_*.py
+trace_*.py
+find_elements.py
+debug_upload_page.py
+take_profile_shot.py
+post_video.py
+login_helper.py
+
+# IDE / Editor configs
+.vscode/
+.idea/
+*.swp
