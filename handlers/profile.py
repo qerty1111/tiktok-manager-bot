@@ -1,4 +1,5 @@
 import os
+import html
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
@@ -66,17 +67,29 @@ async def process_new_bio(message: Message, state: FSMContext):
     )
     
     if success:
-        await msg.edit_text(
-            f"✅ **Описание успешно обновлено в TikTok!**\n\nНовое био: `{new_bio}`",
-            reply_markup=get_account_menu_keyboard(acc_id),
-            parse_mode="Markdown"
-        )
+        try:
+            await msg.edit_text(
+                f"✅ <b>Описание успешно обновлено в TikTok!</b>\n\nНовое био: <code>{html.escape(new_bio)}</code>",
+                reply_markup=get_account_menu_keyboard(acc_id),
+                parse_mode="HTML"
+            )
+        except Exception:
+            await msg.edit_text(
+                f"✅ Описание успешно обновлено в TikTok!\n\nНовое био: {new_bio}",
+                reply_markup=get_account_menu_keyboard(acc_id)
+            )
     else:
-        await msg.edit_text(
-            f"❌ **Не удалось обновить био:**\n`{result_msg}`",
-            reply_markup=get_account_menu_keyboard(acc_id),
-            parse_mode="Markdown"
-        )
+        try:
+            await msg.edit_text(
+                f"❌ <b>Не удалось обновить био:</b>\n{html.escape(result_msg)}",
+                reply_markup=get_account_menu_keyboard(acc_id),
+                parse_mode="HTML"
+            )
+        except Exception:
+            await msg.edit_text(
+                f"❌ Не удалось обновить био:\n{result_msg}",
+                reply_markup=get_account_menu_keyboard(acc_id)
+            )
 
 @router.callback_query(F.data.startswith("change_photo_"))
 async def change_photo_start(callback: CallbackQuery, state: FSMContext):
@@ -85,10 +98,10 @@ async def change_photo_start(callback: CallbackQuery, state: FSMContext):
     await state.set_state(EditProfileState.waiting_for_photo)
     
     text = (
-        "🖼 **Изменение фото профиля (Аватар)**\n\n"
+        "🖼 <b>Изменение фото профиля (Аватар)</b>\n\n"
         "Отправьте новую фотографию в чат:"
     )
-    await callback.message.edit_text(text, reply_markup=get_cancel_keyboard(f"edit_profile_{acc_id}"), parse_mode="Markdown")
+    await callback.message.edit_text(text, reply_markup=get_cancel_keyboard(f"edit_profile_{acc_id}"), parse_mode="HTML")
     await callback.answer()
 
 @router.message(EditProfileState.waiting_for_photo, F.photo)
@@ -113,17 +126,29 @@ async def process_new_photo(message: Message, state: FSMContext):
     )
     
     if success:
-        await msg.edit_text(
-            "✅ **Аватарка успешно обновлена в профиле TikTok!**",
-            reply_markup=get_account_menu_keyboard(acc_id),
-            parse_mode="Markdown"
-        )
+        try:
+            await msg.edit_text(
+                "✅ <b>Аватарка успешно обновлена в профиле TikTok!</b>",
+                reply_markup=get_account_menu_keyboard(acc_id),
+                parse_mode="HTML"
+            )
+        except Exception:
+            await msg.edit_text(
+                "✅ Аватарка успешно обновлена в профиле TikTok!",
+                reply_markup=get_account_menu_keyboard(acc_id)
+            )
     else:
-        await msg.edit_text(
-            f"❌ **Не удалось обновить аватарку:**\n`{result_msg}`",
-            reply_markup=get_account_menu_keyboard(acc_id),
-            parse_mode="Markdown"
-        )
+        try:
+            await msg.edit_text(
+                f"❌ <b>Не удалось обновить аватарку:</b>\n{html.escape(result_msg)}",
+                reply_markup=get_account_menu_keyboard(acc_id),
+                parse_mode="HTML"
+            )
+        except Exception:
+            await msg.edit_text(
+                f"❌ Не удалось обновить аватарку:\n{result_msg}",
+                reply_markup=get_account_menu_keyboard(acc_id)
+            )
 
 
 # ==================== ВСЕ ВИДЕО АККАУНТА ====================
