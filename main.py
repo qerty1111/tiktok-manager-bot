@@ -62,7 +62,8 @@ async def run_bot():
             # Delete webhook before polling
             await bot.delete_webhook(drop_pending_updates=True)
             await dp.start_polling(bot)
-            break
+            logger.warning("Bot polling stopped. Restarting in 3s...")
+            await asyncio.sleep(3)
         except (KeyboardInterrupt, SystemExit):
             logger.info("Bot stopped by user.")
             break

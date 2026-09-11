@@ -1,6 +1,7 @@
 import os
 import random
 import asyncio
+import html
 from typing import List, Dict, Any
 
 from aiogram import Router, F
@@ -209,8 +210,8 @@ async def execute_interaction(message: Message, state: FSMContext, do_like: bool
         if shot_path and os.path.exists(shot_path):
             try:
                 photo_file = FSInputFile(shot_path)
-                caption = f"📸 **{display_name}**:\n{msg}"
-                await message.answer_photo(photo=photo_file, caption=caption, parse_mode="Markdown")
+                safe_cap = f"📸 <b>{html.escape(display_name)}</b>:\n{html.escape(msg)}"
+                await message.answer_photo(photo=photo_file, caption=safe_cap, parse_mode="HTML")
                 try:
                     os.remove(shot_path)
                 except Exception:
@@ -221,19 +222,24 @@ async def execute_interaction(message: Message, state: FSMContext, do_like: bool
         # Human-like cooldown between accounts if multiple
         if idx < len(accounts_to_run):
             wait_sec = random.randint(15, 30)
-            await status_msg.edit_text(
-                f"⏳ Завершено для {display_name}.\n"
-                f"💤 Пауза между аккаунтами {wait_sec} сек...",
-                parse_mode="Markdown"
-            )
+            try:
+                await status_msg.edit_text(
+                    f"⏳ Завершено для {display_name}.\n"
+                    f"💤 Пауза между аккаунтами {wait_sec} сек..."
+                )
+            except Exception:
+                pass
             await asyncio.sleep(wait_sec)
 
-    summary_lines = ["🏁 **Результаты взаимодействия с видео:**\n"]
+    summary_lines = ["🏁 <b>Результаты взаимодействия с видео:</b>\n"]
     for name, ok, note in results:
         icon = "✅" if ok else "❌"
-        summary_lines.append(f"{icon} **{name}**: {note}")
+        summary_lines.append(f"{icon} <b>{html.escape(str(name))}</b>: {html.escape(str(note))}")
 
     summary_text = "\n".join(summary_lines)
     keyboard = get_main_menu_keyboard(all_accounts)
-    await message.answer(summary_text, reply_markup=keyboard, parse_mode="Markdown")
+    try:
+        await message.answer(summary_text, reply_markup=keyboard, parse_mode="HTML")
+    except Exception:
+        await message.answer(summary_text, reply_markup=keyboard)
     await state.clear()

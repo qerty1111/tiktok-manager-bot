@@ -393,7 +393,7 @@ class TikTokService:
         cookies = cls.parse_cookies(cookies_json)
         proxy = cls.parse_proxy(proxy_str)
         async with async_playwright() as p:
-            browser = await cls._launch_browser(p, headless=False)
+            browser = await cls._launch_browser(p, headless=True)
             context = await browser.new_context(proxy=proxy, locale="en-US", viewport={"width": 1440, "height": 900}, user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
             await context.add_init_script("""Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); window.chrome = { runtime: {} };""")
             cookies.append({"name": "tt_lang", "value": "en", "domain": ".tiktok.com", "path": "/"})
@@ -844,7 +844,7 @@ class TikTokService:
         proxy = cls.parse_proxy(proxy_str)
         async with async_playwright() as p:
             # Smart fallback for headless, Linux servers, and Google Chrome
-            browser = await cls._launch_browser(p, headless=False)
+            browser = await cls._launch_browser(p, headless=True)
             context = await browser.new_context(
                 proxy=proxy,
                 locale="en-US",
@@ -880,8 +880,12 @@ class TikTokService:
                 if "/video/" not in video_url:
                     print(f"[TikTok] Profile URL detected: {video_url}. Finding latest video...", flush=True)
                     try:
-                        await page.goto(video_url, wait_until="domcontentloaded", timeout=45000)
-                    except Exception:
+                        await page.goto(video_url, wait_until="domcontentloaded", timeout=40000)
+                    except Exception as e:
+                        err_str = str(e).lower()
+                        if "proxy" in err_str or "407" in err_str or "tunnel" in err_str:
+                            await browser.close()
+                            return False, "❌ Ошибка прокси: прокси-сервер отклонил подключение или истек (Auth/Tunnel Error). Проверьте прокси аккаунта.", None
                         pass
                     await page.wait_for_timeout(4000)
                     first_video = await page.evaluate("""() => {
@@ -896,14 +900,34 @@ class TikTokService:
 
                 print(f"[TikTok] Opening video for interaction: {video_url}", flush=True)
                 try:
-                    await page.goto(video_url, wait_until="domcontentloaded", timeout=45000)
-                except Exception:
-                    pass
+                    await page.goto(video_url, wait_until="domcontentloaded", timeout=40000)
+                except Exception as nav_err:
+                    err_str = str(nav_err).lower()
+                    if "proxy" in err_str or "407" in err_str or "tunnel" in err_str:
+                        await browser.close()
+                        return False, "❌ Ошибка прокси: прокси-сервер отклонил авторизацию (HTTP 407 / Tunnel Error). Проверьте срок действия прокси или обновите его.", None
+                    print(f"[TikTok Navigation Note]: {nav_err}", flush=True)
 
-                # Wait for interaction buttons to hydrate
-                like_btn = page.locator("div[data-e2e='like-icon'], span[data-e2e='like-icon']").first
-                await like_btn.wait_for(state="visible", timeout=30000)
-                await page.wait_for_timeout(2000)
+                # Wait for interaction buttons to hydrate (poll up to 25s)
+                like_btn = page.locator("div[data-e2e='like-icon'], span[data-e2e='like-icon'], button[data-e2e='like-icon']").first
+                found_like = False
+                for _ in range(25):
+                    if await like_btn.count() > 0 and await like_btn.is_visible():
+                        found_like = True
+                        break
+                    await page.wait_for_timeout(1000)
+
+                if not found_like:
+                    # Check if error or login required
+                    body_text = await page.evaluate("() => document.body.innerText.toLowerCase()")
+                    await browser.close()
+                    if "video currently unavailable" in body_text or "video unavailable" in body_text:
+                        return False, "⚠️ Видео недоступно в TikTok (удалено или скрыто настройками приватности).", None
+                    if "log in" in body_text and "sign up" in body_text:
+                        return False, "⚠️ Сессия аккаунта устарела (TikTok разлогинил аккаунт). Обновите cookies аккаунта.", None
+                    return False, "Не удалось загрузить кнопки взаимодействия TikTok (тайм-аут загрузки видео или нестабильный прокси).", None
+
+                await page.wait_for_timeout(1000)
 
                 # Dismiss popups
                 for _ in range(2):
