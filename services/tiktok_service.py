@@ -241,6 +241,37 @@ class TikTokService:
             return False, stats, f"Не удалось подтвердить сессию: {pw_err}"
 
     @classmethod
+    async def _launch_browser(cls, p, headless: bool = True, extra_args: Optional[List[str]] = None):
+        """Launches Chromium/Chrome with smart fallback for headless, Linux servers without $DISPLAY, and missing Chrome."""
+        args = [
+            "--disable-blink-features=AutomationControlled",
+            "--no-sandbox",
+            "--disable-infobars",
+            "--disable-dev-shm-usage"
+        ]
+        if extra_args:
+            args.extend(extra_args)
+
+        # Detect if we are on headless Linux without $DISPLAY
+        is_linux_no_display = (os.name != "nt") and ("DISPLAY" not in os.environ)
+        use_headless = True if is_linux_no_display else headless
+
+        # 1. Try channel="chrome" with requested headless mode
+        try:
+            return await p.chromium.launch(channel="chrome", headless=use_headless, args=args)
+        except Exception:
+            pass
+
+        # 2. Try default chromium with requested headless mode
+        try:
+            return await p.chromium.launch(headless=use_headless, args=args)
+        except Exception:
+            pass
+
+        # 3. Fallback: strictly headless=True
+        return await p.chromium.launch(headless=True, args=args)
+
+    @classmethod
     async def upload_video(
         cls,
         cookies_json: str,
@@ -253,15 +284,9 @@ class TikTokService:
         cookies = cls.parse_cookies(cookies_json)
         proxy = cls.parse_proxy(proxy_str)
         full_caption = f"{description.strip()} {hashtags.strip()}".strip()
-        
+
         async with async_playwright() as p:
-            launch_args = [
-                "--disable-blink-features=AutomationControlled",
-                "--no-sandbox",
-                "--disable-infobars",
-                "--disable-dev-shm-usage"
-            ]
-            browser = await p.chromium.launch(channel="chrome", headless=True, args=launch_args)
+            browser = await cls._launch_browser(p, headless=True)
             
             context_kwargs = {
                 "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -367,10 +392,8 @@ class TikTokService:
         """Upload an avatar once and verify that TikTok persisted a different asset."""
         cookies = cls.parse_cookies(cookies_json)
         proxy = cls.parse_proxy(proxy_str)
-        launch_args = ["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-infobars", "--disable-dev-shm-usage"]
-
         async with async_playwright() as p:
-            browser = await p.chromium.launch(channel="chrome", headless=False, args=launch_args)
+            browser = await cls._launch_browser(p, headless=False)
             context = await browser.new_context(proxy=proxy, locale="en-US", viewport={"width": 1440, "height": 900}, user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
             await context.add_init_script("""Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); window.chrome = { runtime: {} };""")
             cookies.append({"name": "tt_lang", "value": "en", "domain": ".tiktok.com", "path": "/"})
@@ -622,9 +645,8 @@ class TikTokService:
         """Update the profile bio with one Save and strict captcha/API handling."""
         cookies = cls.parse_cookies(cookies_json)
         proxy = cls.parse_proxy(proxy_str)
-        launch_args = ["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-infobars", "--disable-dev-shm-usage"]
         async with async_playwright() as p:
-            browser = await p.chromium.launch(channel="chrome", headless=True, args=launch_args)
+            browser = await cls._launch_browser(p, headless=True)
             context = await browser.new_context(proxy=proxy, locale="en-US", viewport={"width": 1440, "height": 900}, user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
             cookies.append({"name": "tt_lang", "value": "en", "domain": ".tiktok.com", "path": "/"})
             await context.add_cookies(cookies)
@@ -820,16 +842,9 @@ class TikTokService:
 
         cookies = cls.parse_cookies(cookies_json)
         proxy = cls.parse_proxy(proxy_str)
-        launch_args = [
-            "--disable-blink-features=AutomationControlled",
-            "--no-sandbox",
-            "--disable-infobars",
-            "--disable-dev-shm-usage"
-        ]
-
         async with async_playwright() as p:
-            # Visible browser mode is required to bypass SecSDK TicketGuard (which silently drops headless likes/comments)
-            browser = await p.chromium.launch(channel="chrome", headless=False, args=launch_args)
+            # Smart fallback for headless, Linux servers, and Google Chrome
+            browser = await cls._launch_browser(p, headless=False)
             context = await browser.new_context(
                 proxy=proxy,
                 locale="en-US",
