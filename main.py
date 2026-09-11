@@ -15,14 +15,21 @@ from config import BOT_TOKEN, ADMIN_IDS
 from database.db import init_db
 from handlers import start, account, upload, profile, interaction
 
+import os
+
+LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot.log")
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)]
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler(LOG_FILE, encoding="utf-8", mode="a")
+    ]
 )
 logger = logging.getLogger(__name__)
 
-async def main():
+async def run_bot():
     if not BOT_TOKEN or BOT_TOKEN == "your_bot_token_here":
         logger.error("BOT_TOKEN is not set! Please set BOT_TOKEN in .env file.")
         print("\n[!] Ошибка: Токен бота не задан. Укажите BOT_TOKEN в файле .env или передайте его мне.\n")
@@ -50,15 +57,25 @@ async def main():
     dp.include_router(interaction.router)
 
     logger.info("Starting TikTok Manager Bot polling...")
-    try:
-        # Delete webhook before polling
-        await bot.delete_webhook(drop_pending_updates=True)
-        await dp.start_polling(bot)
-    finally:
-        await bot.session.close()
+    while True:
+        try:
+            # Delete webhook before polling
+            await bot.delete_webhook(drop_pending_updates=True)
+            await dp.start_polling(bot)
+            break
+        except (KeyboardInterrupt, SystemExit):
+            logger.info("Bot stopped by user.")
+            break
+        except Exception as e:
+            logger.exception("Error during bot polling: %s. Reconnecting in 5s...", e)
+            await asyncio.sleep(5)
+            
+    await bot.session.close()
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        asyncio.run(run_bot())
     except (KeyboardInterrupt, SystemExit):
         logger.info("Bot stopped.")
+    except Exception as e:
+        logger.exception("Fatal bot crash: %s", e)
