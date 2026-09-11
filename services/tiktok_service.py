@@ -467,16 +467,28 @@ class TikTokService:
 
             try:
                 profile_url = f"https://www.tiktok.com/@{username}"
+                nav_success = False
+                last_nav_err = None
                 for attempt in range(2):
                     try:
-                        await page.goto(profile_url, wait_until="domcontentloaded", timeout=35000)
+                        resp = await page.goto(profile_url, wait_until="domcontentloaded", timeout=35000)
+                        if resp and resp.status >= 400:
+                            await browser.close()
+                            return False, f"TikTok вернул HTTP {resp.status} при открытии профиля."
+                        nav_success = True
                         break
                     except Exception as exc:
+                        last_nav_err = exc
+                        err_s = str(exc).lower()
                         print(f"[TikTok Avatar] Page goto attempt {attempt+1} note: {exc}", flush=True)
-                        if attempt == 1:
-                            pass
+                        if "proxy" in err_s or "407" in err_s or "tunnel" in err_s:
+                            await browser.close()
+                            return False, "❌ Ошибка прокси: прокси-сервер отклонил авторизацию (HTTP 407 / Tunnel Error). Проверьте срок действия прокси или обновите его."
                         await asyncio.sleep(2)
-                await page.wait_for_timeout(3000)
+                
+                if not nav_success:
+                    await browser.close()
+                    return False, f"Не удалось загрузить страницу профиля TikTok: {last_nav_err}"
 
                 for _ in range(3):
                     dismiss = page.locator("button:has-text('Got it'), button:has-text('Not now'), button[aria-label='Close'], button:has-text('Понятно')").first
@@ -709,15 +721,28 @@ class TikTokService:
 
             try:
                 profile_url = f"https://www.tiktok.com/@{username}"
+                nav_success = False
+                last_nav_err = None
                 for attempt in range(2):
                     try:
-                        await page.goto(profile_url, wait_until="domcontentloaded", timeout=35000)
+                        resp = await page.goto(profile_url, wait_until="domcontentloaded", timeout=35000)
+                        if resp and resp.status >= 400:
+                            await browser.close()
+                            return False, f"TikTok вернул HTTP {resp.status} при открытии профиля."
+                        nav_success = True
                         break
                     except Exception as exc:
+                        last_nav_err = exc
+                        err_s = str(exc).lower()
                         print(f"[TikTok Bio] Page goto attempt {attempt+1} note: {exc}", flush=True)
-                        if attempt == 1:
-                            pass
+                        if "proxy" in err_s or "407" in err_s or "tunnel" in err_s:
+                            await browser.close()
+                            return False, "❌ Ошибка прокси: прокси-сервер отклонил авторизацию (HTTP 407 / Tunnel Error). Проверьте срок действия прокси или обновите его."
                         await asyncio.sleep(2)
+                
+                if not nav_success:
+                    await browser.close()
+                    return False, f"Не удалось загрузить страницу профиля TikTok: {last_nav_err}"
                 await page.wait_for_timeout(3000)
                 for _ in range(3):
                     dismiss = page.locator("button:has-text('Got it'), button:has-text('Not now'), button[aria-label='Close'], button:has-text('Понятно')").first
