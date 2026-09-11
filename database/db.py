@@ -129,6 +129,15 @@ async def update_account_cookies(account_id: int, cookies_json: str):
         )
         await db.commit()
 
+async def update_account_proxy(account_id: int, proxy: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("PRAGMA foreign_keys=ON")
+        await db.execute(
+            "UPDATE accounts SET proxy = ? WHERE id = ?",
+            (proxy, account_id)
+        )
+        await db.commit()
+
 async def delete_account(account_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("PRAGMA foreign_keys=ON")
