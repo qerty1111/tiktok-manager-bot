@@ -3,6 +3,7 @@ import asyncio
 import os
 import re
 import random
+import aiohttp
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
 from playwright.async_api import async_playwright
@@ -13,60 +14,118 @@ from services.captcha_solver import CapSolverService
 class TikTokService:
     @staticmethod
     def parse_cookies(cookie_input: str) -> List[Dict[str, Any]]:
-        """Parses cookies from JSON array or raw string."""
-        cookie_input = cookie_input.strip()
-        
-        # Try JSON first
-        if cookie_input.startswith("[") and cookie_input.endswith("]"):
+        """Robust parser supporting JSON array/object, Netscape format, HTTP headers, and raw sessionid."""
+        if not cookie_input:
+            raise ValueError("Cookies пусты. Отправьте cookies в виде JSON, текста или файла.")
+
+        text = cookie_input.strip()
+        # Strip UTF-8 BOM if present
+        if text.startswith("\ufeff"):
+            text = text[1:].strip()
+
+        # 1. Single raw sessionid token (32-64 hex chars or sessionid=...)
+        if re.fullmatch(r"[a-f0-9]{32,64}", text, re.IGNORECASE):
+            return [{
+                "name": "sessionid",
+                "value": text,
+                "domain": ".tiktok.com",
+                "path": "/"
+            }]
+
+        # 2. JSON array or JSON object
+        if (text.startswith("[") and text.endswith("]")) or (text.startswith("{") and text.endswith("}")):
             try:
-                cookies = json.loads(cookie_input)
-                formatted = []
-                for c in cookies:
-                    item = {
-                        "name": c.get("name"),
-                        "value": c.get("value"),
-                        "domain": c.get("domain", ".tiktok.com"),
-                        "path": c.get("path", "/"),
-                    }
-                    if "secure" in c:
-                        item["secure"] = bool(c["secure"])
-                    if "httpOnly" in c:
-                        item["httpOnly"] = bool(c["httpOnly"])
-                    if "sameSite" in c and c["sameSite"] in ["Strict", "Lax", "None"]:
-                        item["sameSite"] = c["sameSite"]
-                    formatted.append(item)
-                return formatted
+                data = json.loads(text)
+                if isinstance(data, dict):
+                    data = [{"name": k, "value": str(v)} for k, v in data.items()]
+                if isinstance(data, list):
+                    formatted = []
+                    for c in data:
+                        if not isinstance(c, dict):
+                            continue
+                        name = str(c.get("name") or c.get("key") or "").strip()
+                        val = str(c.get("value") or "").strip()
+                        if not name or val == "":
+                            continue
+                        domain = str(c.get("domain") or ".tiktok.com").strip()
+                        if not domain.startswith("."):
+                            domain = f".{domain}"
+                        item = {
+                            "name": name,
+                            "value": val,
+                            "domain": domain,
+                            "path": str(c.get("path") or "/")
+                        }
+                        if "secure" in c:
+                            item["secure"] = bool(c["secure"])
+                        if "httpOnly" in c:
+                            item["httpOnly"] = bool(c["httpOnly"])
+                        s_site = str(c.get("sameSite") or "").strip()
+                        if s_site in ["Strict", "Lax", "None"]:
+                            item["sameSite"] = s_site
+                        elif s_site.lower() == "no_restriction":
+                            item["sameSite"] = "None"
+                        formatted.append(item)
+                    if formatted:
+                        return formatted
             except Exception:
                 pass
 
-        # If it's a raw cookie header string (name=val; name2=val2)
-        formatted = []
-        parts = cookie_input.split(";")
-        for part in parts:
-            if "=" in part:
-                name, val = part.strip().split("=", 1)
-                formatted.append({
+        # 3. Netscape format (tab-separated or multiple spaces)
+        netscape_cookies = []
+        for line in text.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = re.split(r"\t+|\s{2,}", line)
+            if len(parts) >= 7:
+                domain, flag, path, secure, expiry, name, val = parts[:7]
+                if not domain.startswith("."):
+                    domain = f".{domain}"
+                netscape_cookies.append({
                     "name": name.strip(),
                     "value": val.strip(),
-                    "domain": ".tiktok.com",
-                    "path": "/"
+                    "domain": domain,
+                    "path": path.strip() or "/"
                 })
-        if not formatted:
-            raise ValueError("Не удалось распознать cookies. Нужен JSON-массив или строка name=value;...")
-        return formatted
+        if netscape_cookies:
+            return netscape_cookies
+
+        # 4. Standard HTTP Cookie header (name=val; name2=val2) or newline-separated
+        header_cookies = []
+        normalized = text.replace("\r\n", ";").replace("\n", ";")
+        for part in normalized.split(";"):
+            part = part.strip()
+            if "=" in part:
+                name, val = part.split("=", 1)
+                name = name.strip()
+                val = val.strip()
+                if name and val:
+                    header_cookies.append({
+                        "name": name,
+                        "value": val,
+                        "domain": ".tiktok.com",
+                        "path": "/"
+                    })
+        if header_cookies:
+            return header_cookies
+
+        raise ValueError("Не удалось распознать формат cookies. Поддерживаются JSON, Netscape (cookies.txt) или строка sessionid=...;.")
 
     @staticmethod
     def parse_proxy(proxy_str: str) -> Optional[Dict[str, str]]:
-        """Parses proxy strings into Playwright proxy dict with sticky session support."""
+        """Parses proxy strings into Playwright/aiohttp proxy dict with sticky session support."""
         if not proxy_str or not proxy_str.strip():
             return None
-            
-        proxy_str = proxy_str.strip()
-        
-        if "@" in proxy_str:
-            return {"server": proxy_str if "://" in proxy_str else f"http://{proxy_str}"}
-            
-        parts = proxy_str.split(":")
+
+        p = proxy_str.strip()
+
+        if "@" in p:
+            if not (p.startswith("http://") or p.startswith("https://") or p.startswith("socks5://")):
+                p = f"http://{p}"
+            return {"server": p}
+
+        parts = p.split(":")
         if len(parts) == 4:
             host, port, user, pwd = parts
             if "__cr." in user and "sessid" not in user:
@@ -80,15 +139,18 @@ class TikTokService:
         elif len(parts) == 2:
             host, port = parts
             return {"server": f"http://{host}:{port}"}
-            
-        return {"server": proxy_str if "://" in proxy_str else f"http://{proxy_str}"}
+
+        return {"server": p if "://" in p else f"http://{p}"}
 
     @classmethod
-    async def verify_session_and_get_profile(cls, cookies_json: str, proxy_str: str = "") -> Tuple[bool, Dict[str, Any]]:
-        """Verifies if TikTok cookies are active and fetches user profile stats."""
-        cookies = cls.parse_cookies(cookies_json)
+    async def verify_session_and_get_profile(cls, cookies_json: str, proxy_str: str = "") -> Tuple[bool, Dict[str, Any], str]:
+        """Verifies if TikTok cookies are active and fetches user profile stats without requiring heavy browser launch."""
+        try:
+            cookies = cls.parse_cookies(cookies_json)
+        except Exception as e:
+            return False, {}, f"Ошибка формата cookies: {e}"
+
         proxy = cls.parse_proxy(proxy_str)
-        
         stats = {
             "username": "",
             "avatar_url": "",
@@ -98,47 +160,85 @@ class TikTokService:
             "video_count": 0,
             "is_active": 0
         }
-        
-        async with async_playwright() as p:
-            launch_args = ["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-dev-shm-usage"]
-            browser = await p.chromium.launch(headless=True, args=launch_args)
-            
-            context_kwargs = {
-                "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                "viewport": {"width": 1440, "height": 900},
-            }
-            if proxy:
-                context_kwargs["proxy"] = proxy
-                
-            context = await browser.new_context(**context_kwargs)
-            try:
+
+        cookie_hdr = "; ".join([f"{c['name']}={c['value']}" for c in cookies if c.get("name") and c.get("value")])
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Cookie": cookie_hdr,
+            "Accept": "application/json, text/plain, */*",
+            "Referer": "https://www.tiktok.com/"
+        }
+
+        aio_proxy = None
+        if proxy:
+            server = proxy.get("server", "").replace("http://", "").replace("https://", "")
+            user = proxy.get("username")
+            pwd = proxy.get("password")
+            if user and pwd:
+                aio_proxy = f"http://{user}:{pwd}@{server}"
+            else:
+                aio_proxy = f"http://{server}"
+
+        # 1. Fast & reliable Passport API (instant, no browser required)
+        passport_url = "https://www.tiktok.com/passport/web/account/info/"
+        try:
+            timeout = aiohttp.ClientTimeout(total=15)
+            async with aiohttp.ClientSession(timeout=timeout) as s:
+                async with s.get(passport_url, headers=headers, proxy=aio_proxy) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        user_data = data.get("data") or {}
+                        if user_data.get("user_id"):
+                            stats["username"] = user_data.get("username") or user_data.get("screen_name") or ""
+                            stats["avatar_url"] = user_data.get("avatar_url") or ""
+                            stats["is_active"] = 1
+                            return True, stats, "Сессия TikTok успешно подтверждена!"
+                        else:
+                            msg = data.get("message") or "login required"
+                            return False, stats, f"TikTok отклонил авторизацию ({msg}). Убедитесь, что cookies взяты из залогиненного профиля (нужен sessionid)."
+                    elif resp.status in [401, 403]:
+                        return False, stats, f"TikTok вернул ошибку {resp.status} (доступ заблокирован). Возможно, прокси в бане или сессия истекла."
+        except aiohttp.ClientProxyConnectionError as pe:
+            return False, stats, f"Ошибка прокси: Не удалось связаться с прокси-сервером ({pe}). Проверьте IP, порт, логин и пароль."
+        except (aiohttp.ClientHttpProxyError, aiohttp.ServerDisconnectedError) as he:
+            return False, stats, f"Ошибка прокси: {he}. Прокси отклонил запрос."
+        except asyncio.TimeoutError:
+            return False, stats, "Тайм-аут подключения: Прокси или TikTok не ответили за 15 секунд. Проверьте работоспособность прокси."
+        except Exception as api_err:
+            print(f"[Passport API Note]: {api_err}", flush=True)
+
+        # 2. Fallback: Browser verification with Playwright (if installed)
+        try:
+            async with async_playwright() as p:
+                launch_args = ["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-dev-shm-usage"]
+                browser = await p.chromium.launch(headless=True, args=launch_args)
+                context_kwargs = {
+                    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                    "viewport": {"width": 1440, "height": 900},
+                }
+                if proxy:
+                    context_kwargs["proxy"] = proxy
+                context = await browser.new_context(**context_kwargs)
                 await context.add_cookies(cookies)
                 page = await context.new_page()
-                
-                await page.goto("https://www.tiktok.com/tiktokstudio/upload", timeout=60000, wait_until="domcontentloaded")
-                await page.wait_for_timeout(4000)
-                
+                await page.goto("https://www.tiktok.com/tiktokstudio/upload", timeout=30000, wait_until="domcontentloaded")
+                await page.wait_for_timeout(3000)
                 current_url = page.url
                 if "login" in current_url:
                     await browser.close()
-                    return False, stats
-                
+                    return False, stats, "Сессия не авторизована: TikTok перенаправил на страницу входа."
                 content = await page.content()
                 username_match = re.search(r'"uniqueId":"([^"]+)"', content)
                 if username_match:
                     stats["username"] = username_match.group(1)
-                
                 avatar_match = re.search(r'"avatarLarger":"([^"]+)"', content) or re.search(r'"avatarThumb":"([^"]+)"', content)
                 if avatar_match:
                     stats["avatar_url"] = avatar_match.group(1).replace("\\u002F", "/").replace("\\u0026", "&")
-                    
                 stats["is_active"] = 1
                 await browser.close()
-                return True, stats
-            except Exception as e:
-                print(f"[Verify Session Error]: {e}")
-                await browser.close()
-                return False, stats
+                return True, stats, "Сессия TikTok подтверждена через веб-студию!"
+        except Exception as pw_err:
+            return False, stats, f"Не удалось подтвердить сессию: {pw_err}"
 
     @classmethod
     async def upload_video(

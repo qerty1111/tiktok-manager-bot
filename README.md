@@ -47,7 +47,17 @@ source venv/bin/activate
 ```bash
 pip install -r requirements.txt
 playwright install chromium
+
+# Если запускаете на Linux / Ubuntu сервере (ОБЯЗАТЕЛЬНО для работы Chromium):
+playwright install-deps
 ```
+
+### 3. Формат Cookies для добавления аккаунтов:
+Бот поддерживает любые популярные форматы:
+1. **JSON-массив** — экспорт через расширение Chrome `Cookie-Editor` (кнопка Export -> Export as JSON).
+2. **Netscape** — файл `cookies.txt` или текст из любых магазинов аккаунтов.
+3. **Строка заголовка** — `sessionid=xxxx; sid_tt=yyyy;`
+4. **Один токен** — просто значение `sessionid` из cookies.
 
 ### 3. Настройка конфигурации:
 Создайте файл `.env` на основе `.env.example`:

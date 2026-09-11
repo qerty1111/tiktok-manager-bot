@@ -76,6 +76,8 @@ async def get_account_by_id(account_id: int) -> Optional[Dict[str, Any]]:
             row = await cursor.fetchone()
             return dict(row) if row else None
 
+get_account = get_account_by_id
+
 async def add_account(name: str, cookies_json: str, proxy: str = "", username: str = "") -> int:
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("PRAGMA foreign_keys=ON")
