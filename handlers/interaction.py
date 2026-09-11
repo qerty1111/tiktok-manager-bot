@@ -95,9 +95,23 @@ async def process_video_url(message: Message, state: FSMContext):
     await state.update_data(video_url=url)
     await state.set_state(InteractionState.waiting_for_action)
 
+    video_url_lower = url.lower()
+    target_acc_id = (await state.get_data()).get("target_acc_id")
+    extra_note = ""
+    if target_acc_id:
+        acc = await db.get_account(target_acc_id)
+        if acc and acc.get("username") and acc["username"].lower() in video_url_lower:
+            extra_note = (
+                "\n\n⚠️ **Внимание (правила TikTok):**\n"
+                "Вы выбрали этот же аккаунт для лайка своего видео!\n"
+                "• TikTok **не увеличивает** публичный счетчик лайков автору на свои же видео (сердечко будет гореть, но счетчик останется 0).\n"
+                "• Комментарии автора на свежих аккаунтах TikTok может фильтровать от других пользователей.\n"
+                "👉 *Для реального поднятия счетчика используйте второй аккаунт (Акк 2)!*"
+            )
+
     text = (
         "🎯 **Выберите действие для этого видео:**\n\n"
-        f"📹 Видео: {url}"
+        f"📹 Видео: {url}{extra_note}"
     )
     await message.answer(
         text,

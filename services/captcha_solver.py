@@ -181,22 +181,21 @@ class CapSolverService:
                     print("[CapSolver] Failed to get rotation angle.", flush=True)
                     return False
 
-                # Map CapSolver angle to clockwise slider rotation (0..180 deg)
-                effective_angle = (360 - raw_angle) if raw_angle > 180 else raw_angle
-                effective_angle = min(180.0, max(0.0, float(effective_angle)))
-
-                # Closed-loop drag matching DOM rotation
-                print(f"[CapSolver] Dragging thumb to rotate piece to {effective_angle} deg...", flush=True)
+                # CapSolver returns the required clockwise rotation in degrees (0..359)
+                target_deg = float(raw_angle % 360)
+                print(f"[CapSolver] Dragging thumb to rotate piece to {target_deg} deg (raw={raw_angle})...", flush=True)
                 await page.mouse.move(start_x, start_y)
+                await asyncio.sleep(random.uniform(0.08, 0.15))
                 await page.mouse.down()
+                await asyncio.sleep(random.uniform(0.08, 0.15))
 
                 cur_x = start_x
-                step_px = 2.5
-                for s in range(150):
+                step_px = 2.0
+                for s in range(250):
                     cur_x += step_px
                     if cur_x - start_x > max_drag:
                         break
-                    cur_y = start_y + random.uniform(-0.5, 0.5)
+                    cur_y = start_y + random.uniform(-0.6, 0.6)
                     await page.mouse.move(cur_x, cur_y, steps=1)
                     await asyncio.sleep(0.015)
 
@@ -207,12 +206,12 @@ class CapSolverService:
                     m = re.search(r'rotate\(([-0-9.]+)deg\)', rot_str)
                     if m:
                         cur_deg = float(m.group(1))
-                        if cur_deg >= effective_angle - 1.0:
+                        if cur_deg >= target_deg - 1.0:
                             break
 
-                await asyncio.sleep(0.3)
+                await asyncio.sleep(0.35)
                 await page.mouse.up()
-                print(f"[CapSolver] Round {round_num}: Released at target rotation!", flush=True)
+                print(f"[CapSolver] Round {round_num}: Released at target rotation {target_deg} deg!", flush=True)
             else:
                 # Puzzle slider
                 print(f"[CapSolver] Round {round_num}: Puzzle slider detected. Calling slider_1...", flush=True)
@@ -297,7 +296,7 @@ class CapSolverService:
                 return True
 
             print("[CapSolver] Captcha detected! Starting multi-round solver...", flush=True)
-            for round_num in range(1, 4):
+            for round_num in range(1, 6):
                 is_open = await page.evaluate("""() => {
                     const c = document.querySelector("#captcha-verify-container-main-page, div.captcha-verify-container, [class*='captcha-verify']");
                     return c !== null && c.getBoundingClientRect().width > 0;

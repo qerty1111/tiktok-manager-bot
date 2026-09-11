@@ -346,11 +346,12 @@ class TikTokService:
                 profile_url = f"https://www.tiktok.com/@{username}"
                 for attempt in range(2):
                     try:
-                        await page.goto(profile_url, wait_until="load", timeout=60000)
+                        await page.goto(profile_url, wait_until="domcontentloaded", timeout=35000)
                         break
                     except Exception as exc:
+                        print(f"[TikTok Avatar] Page goto attempt {attempt+1} note: {exc}", flush=True)
                         if attempt == 1:
-                            raise
+                            pass
                         await asyncio.sleep(2)
                 await page.wait_for_timeout(3000)
 
@@ -361,8 +362,20 @@ class TikTokService:
                         await page.wait_for_timeout(500)
                 await page.keyboard.press("Escape")
 
-                edit_btn = page.locator("button[data-e2e='edit-profile-entrance'], button:has-text('Edit profile'), button:has-text('Изменить профиль'), button[data-e2e*='edit']").first
-                await edit_btn.wait_for(state="visible", timeout=30000)
+                # Robust polling for Edit profile button across client-side SPA routing & hydration
+                edit_btn = None
+                for _ in range(45):
+                    await page.wait_for_timeout(1000)
+                    try:
+                        candidates = page.locator("button[data-e2e='edit-profile-entrance'], button:has-text('Edit profile'), button:has-text('Изменить профиль'), button[data-e2e*='edit']")
+                        if await candidates.count() > 0 and await candidates.first.is_visible():
+                            edit_btn = candidates.first
+                            break
+                    except Exception:
+                        pass
+                if not edit_btn:
+                    await browser.close()
+                    return False, "Кнопка редактирования профиля не появилась (страница профиля не загрузилась)."
                 old_avatar_src = await avatar_url()
 
                 await edit_btn.click(force=True)
@@ -373,7 +386,7 @@ class TikTokService:
                 await page.wait_for_timeout(3000)
 
                 apply_btn = page.locator("button:has-text('Apply'), button:has-text('Confirm'), button:has-text('Применить')").first
-                await apply_btn.wait_for(state="visible", timeout=12000)
+                await apply_btn.wait_for(state="visible", timeout=15000)
                 abox = await apply_btn.bounding_box()
                 if abox:
                     await page.mouse.click(abox["x"] + abox["width"]/2, abox["y"] + abox["height"]/2)
@@ -383,16 +396,21 @@ class TikTokService:
 
                 # Check if SecSDK captcha appeared on Apply
                 solver = CapSolverService(CAPSOLVER_API_KEY) if CAPSOLVER_API_KEY else None
-                for _ in range(8):
+                for _ in range(10):
                     await page.wait_for_timeout(500)
                     if await captcha_visible():
                         print("[TikTok] Captcha detected on crop Apply! Solving...", flush=True)
                         if solver:
                             await solver.solve_tiktok_puzzle(page)
-                        await page.wait_for_timeout(2000)
+                        await page.wait_for_timeout(2500)
                         break
 
+                if await captcha_visible():
+                    await browser.close()
+                    return False, "Капча TikTok осталась открыта, не удалось подтвердить загрузку фото. Попробуйте еще раз."
+
                 # If crop dialog is still open after captcha, re-click Apply
+                await page.wait_for_timeout(1000)
                 apply_btn = page.locator("button:has-text('Apply'), button:has-text('Confirm'), button:has-text('Применить')").first
                 if await apply_btn.count() > 0 and await apply_btn.is_visible():
                     print("[TikTok] Re-clicking Apply after captcha resolution...", flush=True)
@@ -406,7 +424,7 @@ class TikTokService:
                 save_btn = page.locator("button[data-e2e='edit-profile-save'], button:has-text('Save'), button:has-text('Сохранить')").first
                 await save_btn.wait_for(state="visible", timeout=15000)
                 # Wait for upload/image to complete and save_btn to become enabled
-                for _ in range(40):
+                for _ in range(50):
                     crop_visible = await page.locator("button:has-text('Apply')").count() > 0 and await page.locator("button:has-text('Apply')").first.is_visible()
                     if not crop_visible and not await save_btn.is_disabled():
                         break
@@ -414,7 +432,7 @@ class TikTokService:
 
                 if await save_btn.is_disabled():
                     await browser.close()
-                    return False, "Кнопка сохранения аватарки осталась недоступна (фото не загрузилось)."
+                    return False, "Кнопка сохранения аватарки осталась недоступна (фото не загрузилось). Попробуйте фото формата JPG или меньшего размера."
 
                 save_start = len(api_events)
                 sbox = await save_btn.bounding_box()
@@ -571,11 +589,12 @@ class TikTokService:
                 profile_url = f"https://www.tiktok.com/@{username}"
                 for attempt in range(2):
                     try:
-                        await page.goto(profile_url, wait_until="load", timeout=60000)
+                        await page.goto(profile_url, wait_until="domcontentloaded", timeout=35000)
                         break
                     except Exception as exc:
+                        print(f"[TikTok Bio] Page goto attempt {attempt+1} note: {exc}", flush=True)
                         if attempt == 1:
-                            raise
+                            pass
                         await asyncio.sleep(2)
                 await page.wait_for_timeout(3000)
                 for _ in range(3):
@@ -584,8 +603,20 @@ class TikTokService:
                         await dismiss.click(force=True)
                         await page.wait_for_timeout(500)
                 await page.keyboard.press("Escape")
-                edit_btn = page.locator("button[data-e2e='edit-profile-entrance'], button:has-text('Edit profile'), button:has-text('Изменить профиль'), button[data-e2e*='edit']").first
-                await edit_btn.wait_for(state="visible", timeout=30000)
+                # Robust polling for Edit profile button across client-side SPA routing & hydration
+                edit_btn = None
+                for _ in range(45):
+                    await page.wait_for_timeout(1000)
+                    try:
+                        candidates = page.locator("button[data-e2e='edit-profile-entrance'], button:has-text('Edit profile'), button:has-text('Изменить профиль'), button[data-e2e*='edit']")
+                        if await candidates.count() > 0 and await candidates.first.is_visible():
+                            edit_btn = candidates.first
+                            break
+                    except Exception:
+                        pass
+                if not edit_btn:
+                    await browser.close()
+                    return False, "Кнопка редактирования профиля не появилась (страница профиля не загрузилась)."
                 await edit_btn.click(force=True)
                 await page.wait_for_timeout(1500)
                 bio_box = page.locator("textarea[data-e2e='edit-profile-bio-input'], textarea").first
