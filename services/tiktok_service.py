@@ -1002,35 +1002,70 @@ class TikTokService:
 
                 # 2. COMMENT ACTION
                 if comment_text and comment_text.strip():
-                    comment_icon = page.locator("div[data-e2e='comment-icon']").first
-                    if await comment_icon.count() > 0:
-                        await comment_icon.click()
-                        await page.wait_for_timeout(2000)
+                    # Dismiss cookie consent banner if blocking bottom of page
+                    for sel in ["button:has-text('Allow all')", "button:has-text('Decline optional cookies')", "button:has-text('Accept all')"]:
+                        btn = page.locator(sel).first
+                        if await btn.count() > 0 and await btn.is_visible():
+                            try:
+                                await btn.click(force=True)
+                                await page.wait_for_timeout(1000)
+                            except Exception:
+                                pass
+                            break
 
-                    # Focus DraftEditor textbox
-                    textbox = page.locator("div.public-DraftEditor-content[role='textbox'], div[data-e2e='comment-text']").first
-                    await textbox.wait_for(state="visible", timeout=15000)
+                    # Ensure Comments tab is active
+                    comm_tab = page.locator("button:has-text('Comments'), div:has-text('Comments')").first
+                    if await comm_tab.count() > 0 and await comm_tab.is_visible():
+                        try:
+                            await comm_tab.click(force=True)
+                            await page.wait_for_timeout(1200)
+                        except Exception:
+                            pass
+
+                    # Click comment icon on video action bar
+                    comment_icon = page.locator("div[data-e2e='comment-icon']").first
+                    if await comment_icon.count() > 0 and await comment_icon.is_visible():
+                        try:
+                            await comment_icon.click(force=True)
+                            await page.wait_for_timeout(1500)
+                        except Exception:
+                            pass
+
+                    # Focus comment input with robust multi-selector
+                    textbox = page.locator(
+                        "div[data-e2e='comment-input'], "
+                        "div[data-e2e='comment-text'], "
+                        "div[contenteditable='true'][role='textbox'], "
+                        "div.public-DraftEditor-content[role='textbox'], "
+                        "div:has-text('Add comment...')"
+                    ).first
+                    await textbox.wait_for(state="visible", timeout=20000)
                     tbox = await textbox.bounding_box()
                     if tbox:
                         await page.mouse.click(tbox['x'] + tbox['width']/2, tbox['y'] + tbox['height']/2)
                     else:
-                        await textbox.click()
-                    await page.wait_for_timeout(400)
+                        await textbox.click(force=True)
+                    await page.wait_for_timeout(500)
 
                     clean_comment = comment_text.strip()
                     print(f"[TikTok] Typing comment: {clean_comment}", flush=True)
                     await page.keyboard.type(clean_comment, delay=random.randint(35, 55))
                     await page.wait_for_timeout(800)
 
-                    post_btn = page.locator("div[data-e2e='comment-post'], button[data-e2e='comment-post']").first
-                    await post_btn.wait_for(state="visible", timeout=10000)
-                    pbox = await post_btn.bounding_box()
-                    if pbox:
-                        await page.mouse.move(pbox['x'] + pbox['width']/2, pbox['y'] + pbox['height']/2, steps=6)
-                        await page.wait_for_timeout(200)
-                        await page.mouse.click(pbox['x'] + pbox['width']/2, pbox['y'] + pbox['height']/2)
+                    post_btn = page.locator(
+                        "div[data-e2e='comment-post'], "
+                        "button[data-e2e='comment-post'], "
+                        "[class*='PostButton'], "
+                        "div[aria-label*='post' i]"
+                    ).first
+                    if await post_btn.count() > 0 and await post_btn.is_visible():
+                        pbox = await post_btn.bounding_box()
+                        if pbox:
+                            await page.mouse.click(pbox['x'] + pbox['width']/2, pbox['y'] + pbox['height']/2)
+                        else:
+                            await post_btn.click(force=True)
                     else:
-                        await post_btn.click()
+                        await page.keyboard.press("Enter")
                     print("[TikTok] Clicked Comment Post button.", flush=True)
 
                     solver = CapSolverService(CAPSOLVER_API_KEY) if CAPSOLVER_API_KEY else None
